@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Escape - Fixed Version</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #020617;
+            font-family: 'Orbitron', sans-serif;
+            user-select: none;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+        .neon-text {
+            text-shadow: 0 0 10px rgba(34, 211, 238, 0.8), 0 0 20px rgba(34, 211, 238, 0.4);
+        }
+        .neon-border {
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.5);
+            border: 2px solid rgba(34, 211, 238, 0.8);
+        }
+        .btn-action {
+            background: rgba(34, 211, 238, 0.1);
+            transition: all 0.2s;
+        }
+        .btn-action:active {
+            transform: scale(0.95);
+            background: rgba(34, 211, 238, 0.3);
+        }
+        #ui-overlay {
+            pointer-events: none;
+        }
+        #ui-overlay > * {
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container" class="relative w-screen h-screen flex items-center justify-center">
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-overlay" class="absolute inset-0 flex flex-col items-center justify-center">
+        <!-- Start Screen -->
+        <div id="start-screen" class="bg-slate-900/90 p-8 rounded-2xl neon-border text-center flex flex-col items-center">
+            <h1 class="text-5xl font-bold text-cyan-400 mb-6 neon-text">NEON ESCAPE</h1>
+            <p class="text-cyan-200 mb-8 max-w-md">
+                エネルギーを集めてゲートへ急げ。<br>
+                [W/Space] ジャンプ | [A][D] 移動<br>
+                [Shift/K] ダッシュ
+            </p>
+            <button id="start-btn" class="px-10 py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-full text-xl transition-all transform hover:scale-105 active:scale-95">
+                START MISSION
+            </button>
+        </div>
+
+        <!-- HUD -->
+        <div id="hud" class="hidden absolute top-0 left-0 w-full p-4 flex justify-between items-start pointer-events-none">
+            <div class="flex flex-col gap-2">
+                <div class="text-cyan-400 text-xl font-bold neon-text">ENERGY: <span id="score-val">0</span></div>
+                <div class="w-48 h-3 bg-slate-800 rounded-full overflow-hidden border border-cyan-900">
+                    <div id="hp-bar" class="h-full bg-cyan-500 transition-all duration-300" style="width: 100%"></div>
+                </div>
+            </div>
+            
+            <!-- Central Timer Display -->
+            <div class="absolute left-1/2 -translate-x-1/2 top-4 flex flex-col items-center">
+                <div class="text-cyan-500 text-xs tracking-widest mb-1 opacity-70">TIME REMAINING</div>
+                <div id="timer-display" class="text-[8rem] font-bold text-cyan-400 neon-text tabular-nums tracking-tighter leading-none">00:00</div>
+            </div>
+
+            <div class="text-right">
+                <div id="level-display" class="text-cyan-400 text-xl font-bold">LEVEL 1</div>
+            </div>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="result-screen" class="hidden bg-slate-900/95 p-8 rounded-2xl neon-border text-center flex flex-col items-center">
+            <h2 id="result-title" class="text-4xl font-bold text-red-500 mb-4 neon-text">MISSION FAILED</h2>
+            <p id="result-info" class="text-cyan-100 mb-8 italic">エネルギーが不足しています...</p>
+            <button id="restart-btn" class="px-8 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-full transition-all">
+                RETRY
+            </button>
+        </div>
+
+        <!-- Mobile Controls -->
+        <div id="mobile-controls" class="hidden absolute bottom-8 left-0 w-full px-8 flex justify-between items-end lg:hidden">
+            <div class="flex gap-4">
+                <div id="ctrl-left" class="w-16 h-16 rounded-full flex items-center justify-center btn-action text-cyan-400 text-3xl font-bold border-2 border-cyan-400/30">←</div>
+                <div id="ctrl-right" class="w-16 h-16 rounded-full flex items-center justify-center btn-action text-cyan-400 text-3xl font-bold border-2 border-cyan-400/30">→</div>
+            </div>
+            <div class="flex gap-4">
+                <div id="ctrl-dash" class="w-16 h-16 rounded-full flex items-center justify-center btn-action text-cyan-400 text-xl font-bold border-2 border-cyan-400/30">DASH</div>
+                <div id="ctrl-jump" class="w-20 h-20 rounded-full flex items-center justify-center btn-action text-cyan-400 text-2xl font-bold border-2 border-cyan-400/30">JUMP</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('start-btn');
+const restartBtn = document.getElementById('restart-btn');
+const scoreVal = document.getElementById('score-val');
+const hpBar = document.getElementById('hp-bar');
+const levelDisplay = document.getElementById('level-display');
+const timerDisplay = document.getElementById('timer-display');
+
+let gameState = 'START';
+let score = 0;
+let level = 1;
+let startTime = 0;
+let hp = 100;
+let cameraX = 0;
+let currentLevelTimeLimit = 10;
+
+const GRAVITY = 0.6;
+const FRICTION = 0.85;
+const COLORS = {
+    player: '#22d3ee',
+    playerTrail: 'rgba(34, 211, 238, 0.3)',
+    enemy: '#f43f5e',
+    platform: '#1e293b',
+    platformEdge: '#334155',
+    goal: '#a855f7',
+    coin: '#fbbf24'
+};
+
+const keys = { left: false, right: false, jump: false, dash: false };
+
+class Particle {
+    constructor(x, y, color, vx, vy, size, life) {
+        this.x = x; this.y = y; this.color = color;
+        this.vx = vx; this.vy = vy; this.size = size;
+        this.life = life; this.maxLife = life;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy;
+        this.vy += 0.1; this.life--;
+    }
+    draw(ctx) {
+        ctx.globalAlpha = this.life / this.maxLife;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x, this.y, this.size, this.size);
+        ctx.globalAlpha = 1;
+    }
+}
+
+class Player {
+    constructor() {
+        this.reset();
+    }
+    reset() {
+        this.x = 50; this.y = 300;
+        this.vx = 0; this.vy = 0;
+        this.width = 30; this.height = 40;
+        this.speed = 1.6; this.maxSpeed = 14;
+        this.jumpPower = -12;
+        this.jumpCount = 0;
+        this.isGrounded = false;
+        this.isDashing = false;
+        this.dashCooldown = 0;
+        this.facing = 1;
+    }
+    update(platforms) {
+        if (keys.left) { this.vx -= this.speed; this.facing = -1; }
+        if (keys.right) { this.vx += this.speed; this.facing = 1; }
+        
+        if (keys.dash && this.dashCooldown === 0) {
+            this.isDashing = true;
+            this.vx = this.facing * 20;
+            this.dashCooldown = 40;
+            setTimeout(() => { this.isDashing = false; }, 200);
+        }
+
+        this.vx *= FRICTION;
+        this.vy += GRAVITY;
+
+        let nextX = this.x + this.vx;
+        let nextY = this.y + this.vy;
+        this.isGrounded = false;
+
+        platforms.forEach(p => {
+            // Collision Logic
+            if (this.x < p.x + p.w && this.x + this.width > p.x) {
+                if (this.y + this.height <= p.y && nextY + this.height >= p.y) {
+                    this.vy = 0; nextY = p.y - this.height;
+                    this.isGrounded = true; this.jumpCount = 0;
+                }
+                if (this.y >= p.y + p.h && nextY <= p.y + p.h) {
+                    this.vy = 1; nextY = p.y + p.h;
+                }
+            }
+            if (this.y < p.y + p.h && this.y + this.height > p.y) {
+                if (this.x + this.width <= p.x && nextX + this.width >= p.x) {
+                    this.vx = 0; nextX = p.x - this.width;
+                }
+                if (this.x >= p.x + p.w && nextX <= p.x + p.w) {
+                    this.vx = 0; nextX = p.x + p.w;
+                }
+            }
+        });
+
+        this.x = nextX; this.y = nextY;
+        if (this.dashCooldown > 0) this.dashCooldown--;
+        if (this.y > canvas.height + 200) damage(100);
+    }
+    draw(ctx) {
+        if (this.isDashing) {
+            ctx.fillStyle = COLORS.playerTrail;
+            ctx.fillRect(this.x - (this.vx * 1), this.y, this.width, this.height);
+        }
+        ctx.shadowBlur = 15; ctx.shadowColor = COLORS.player;
+        ctx.fillStyle = COLORS.player;
+        ctx.beginPath();
+        ctx.roundRect(this.x, this.y, this.width, this.height, 8);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        const eyeX = this.facing === 1 ? this.x + 20 : this.x + 5;
+        ctx.fillRect(eyeX, this.y + 10, 5, 5);
+        ctx.shadowBlur = 0;
+    }
+}
+
+const player = new Player();
+const platforms = [];
+const coins = [];
+const enemies = [];
+const particles = [];
+let goal = { x: 0, y: 0, w: 60, h: 80 };
+
+function generateProceduralLevel(num) {
+    const config = { platforms: [{x: 0, y: 500, w: 300, h: 100}], coins: [], enemies: [], goal: {x: 0, y: 0} };
+    let lastX = 300; let lastY = 500;
+    const segments = 5 + Math.floor(num / 2);
+    for (let i = 0; i < segments; i++) {
+        const gap = 120 + Math.random() * 150;
+        const width = 150 + Math.random() * 200;
+        const heightDiff = (Math.random() - 0.5) * 200;
+        lastX += gap;
+        lastY = Math.max(200, Math.min(600, lastY + heightDiff));
+        config.platforms.push({x: lastX, y: lastY, w: width, h: 40});
+        if (Math.random() > 0.3) config.coins.push({x: lastX + width/2, y: lastY - 40});
+        if (num > 2 && Math.random() > 0.5) config.enemies.push({x: lastX + width/2, y: lastY - 10, range: width/2 - 20});
+    }
+    config.goal = {x: lastX + 100, y: lastY - 80};
+    return config;
+}
+
+function initLevel(num) {
+    platforms.length = 0; coins.length = 0; enemies.length = 0; particles.length = 0;
+    player.reset(); cameraX = 0;
+    
+    const levelConfigs = [
+        {   // レベル1
+            platforms: [{x: 0, y: 500, w: 400, h: 100}, {x: 500, y: 400, w: 300, h: 40}, {x: 900, y: 300, w: 200, h: 40}, {x: 1200, y: 450, w: 400, h: 100}, {x: 2000, y: 500, w: 600, h: 100}],
+            coins: [{x: 550, y: 350}, {x: 650, y: 350}, {x: 950, y: 250}, {x: 1300, y: 400}],
+            enemies: [{x: 1300, y: 410, range: 100}], goal: {x: 2400, y: 420}
+        },
+        {   // レベル2
+            platforms: [{x: 0, y: 500, w: 300, h: 100}, {x: 400, y: 350, w: 100, h: 300}, {x: 600, y: 200, w: 100, h: 300}, {x: 800, y: 400, w: 400, h: 40}, {x: 1300, y: 250, w: 200, h: 40}, {x: 1600, y: 500, w: 400, h: 40}, {x: 2100, y: 300, w: 400, h: 300}],
+            coins: [{x: 450, y: 300}, {x: 650, y: 150}, {x: 1400, y: 200}],
+            enemies: [{x: 900, y: 360, range: 150}], goal: {x: 2300, y: 220}
+        }
+    ];
+
+    let config = num <= levelConfigs.length ? levelConfigs[num - 1] : generateProceduralLevel(num);
+    
+    currentLevelTimeLimit = 16; 
+    
+    config.platforms.forEach(p => platforms.push(p));
+    config.coins.forEach(c => coins.push({ ...c, collected: false }));
+    config.enemies.forEach(e => enemies.push({ ...e, ox: e.x, dir: 1 }));
+    goal = { ...goal, ...config.goal };
+}
+
+function update() {
+    if (gameState !== 'PLAYING') return;
+
+    player.update(platforms);
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const timeLeft = Math.max(0, currentLevelTimeLimit - elapsed);
+    
+    const mins = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+    const secs = String(timeLeft % 60).padStart(2, '0');
+    timerDisplay.innerText = `${mins}:${secs}`;
+
+    if (timeLeft <= 5) {
+        timerDisplay.className = 'text-[10rem] font-bold text-red-500 neon-text animate-bounce tabular-nums tracking-tighter leading-none';
+    } else if (timeLeft <= 10) {
+        timerDisplay.className = 'text-[9rem] font-bold text-red-400 neon-text animate-pulse tabular-nums tracking-tighter leading-none';
+    } else {
+        timerDisplay.className = 'text-[8rem] font-bold text-cyan-400 neon-text tabular-nums tracking-tighter leading-none';
+    }
+
+    if (timeLeft <= 0) { gameOver('TIME UP'); return; }
+
+    cameraX += (-player.x + canvas.width / 3 - cameraX) * 0.1;
+
+    coins.forEach(c => {
+        if (!c.collected && Math.hypot(player.x - c.x, player.y - c.y) < 40) {
+            c.collected = true; score += 10; scoreVal.innerText = score;
+            createParticles(c.x, c.y, COLORS.coin, 8);
+        }
+    });
+
+    enemies.forEach((e, i) => {
+        e.x += e.dir * 2;
+        if (Math.abs(e.x - e.ox) > e.range) e.dir *= -1;
+        
+        // キャラクターの移動速度が速いため、円形判定(hypot)からより確実な矩形判定(AABB)に変更
+        const enemyRadius = 15;
+        const isColliding = 
+            player.x < e.x + enemyRadius &&
+            player.x + player.width > e.x - enemyRadius &&
+            player.y < e.y + enemyRadius &&
+            player.y + player.height > e.y - enemyRadius;
+
+        if (isColliding) {
+            if (player.isDashing) {
+                e.dead = true; 
+                score += 50; 
+                scoreVal.innerText = score; 
+                createParticles(e.x, e.y, COLORS.enemy, 15);
+            }
+            else {
+                damage(10); // ダメージを少し明確化(0.5から10へ)
+                // ノックバック速度を維持
+                player.vx = (player.x < e.x ? -100 : 100); 
+                player.vy = -5; // 少し上に跳ねさせることで接地判定を切り、ノックバックを強調
+            }
+        }
+    });
+    for(let i=enemies.length-1; i>=0; i--) if(enemies[i].dead) enemies.splice(i, 1);
+
+    if (player.x + player.width > goal.x && player.x < goal.x + goal.w &&
+        player.y + player.height > goal.y && player.y < goal.y + goal.h) { levelComplete(); }
+
+    particles.forEach((p, index) => { p.update(); if (p.life <= 0) particles.splice(index, 1); });
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#0f172a'); grad.addColorStop(1, '#020617');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(cameraX, 0);
+
+    platforms.forEach(p => {
+        ctx.fillStyle = COLORS.platform; ctx.beginPath(); ctx.roundRect(p.x, p.y, p.w, p.h, 4); ctx.fill();
+        ctx.strokeStyle = COLORS.platformEdge; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.w, p.y); ctx.stroke();
+    });
+
+    coins.forEach(c => {
+        if (!c.collected) {
+            ctx.shadowBlur = 10; ctx.shadowColor = COLORS.coin; ctx.fillStyle = COLORS.coin;
+            ctx.beginPath(); ctx.arc(c.x, c.y + Math.sin(Date.now()/200)*5, 8, 0, Math.PI*2); ctx.fill();
+        }
+    });
+
+    enemies.forEach(e => {
+        ctx.shadowBlur = 15; ctx.shadowColor = COLORS.enemy; ctx.fillStyle = COLORS.enemy;
+        ctx.beginPath(); ctx.roundRect(e.x - 15, e.y - 15, 30, 30, 15); ctx.fill();
+    });
+
+    ctx.shadowBlur = 20; ctx.shadowColor = COLORS.goal; ctx.fillStyle = COLORS.goal; ctx.globalAlpha = 0.6 + Math.sin(Date.now()/300)*0.2;
+    ctx.fillRect(goal.x, goal.y, goal.w, goal.h); ctx.globalAlpha = 1.0; ctx.shadowBlur = 0;
+
+    particles.forEach(p => p.draw(ctx));
+    player.draw(ctx);
+    ctx.restore();
+
+    requestAnimationFrame(() => { update(); draw(); });
+}
+
+function damage(amount) {
+    hp -= amount; hpBar.style.width = hp + '%';
+    if (hp <= 0) gameOver('HP EMPTY');
+}
+
+function gameOver(reason) {
+    gameState = 'GAMEOVER';
+    document.getElementById('result-screen').classList.remove('hidden');
+    document.getElementById('result-title').innerText = "MISSION FAILED";
+    document.getElementById('result-info').innerText = reason === 'TIME UP' ? "時間切れです。" : "生命維持装置が停止しました。";
+}
+
+function levelComplete() {
+    gameState = 'CLEAR';
+    document.getElementById('result-screen').classList.remove('hidden');
+    document.getElementById('result-title').innerText = "LEVEL CLEAR";
+    document.getElementById('result-info').innerText = `次へ進みます。`;
+    level++;
+    setTimeout(() => { document.getElementById('restart-btn').innerText = "NEXT LEVEL"; }, 100);
+}
+
+function createParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+        particles.push(new Particle(x, y, color, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, Math.random() * 4 + 2, 30 + Math.random() * 20));
+    }
+}
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('keydown', e => {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = true;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = true;
+    if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') {
+        if (gameState === 'PLAYING' && player.jumpCount < 2) { player.vy = -12; player.jumpCount++; createParticles(player.x + player.width/2, player.y + player.height, COLORS.player, 5); }
+    }
+    if (e.code === 'ShiftLeft' || e.code === 'KeyK') keys.dash = true;
+});
+window.addEventListener('keyup', e => {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'ShiftLeft' || e.code === 'KeyK') keys.dash = false;
+});
+
+// Mobile
+const touchElements = { 'ctrl-left': 'left', 'ctrl-right': 'right', 'ctrl-dash': 'dash' };
+Object.keys(touchElements).forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[touchElements[id]] = true; });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); keys[touchElements[id]] = false; });
+});
+document.getElementById('ctrl-jump').addEventListener('touchstart', (e) => {
+    e.preventDefault(); if (gameState === 'PLAYING' && player.jumpCount < 2) { player.vy = -12; player.jumpCount++; }
+});
+
+startBtn.onclick = () => {
+    Tone.start(); document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden'); document.getElementById('mobile-controls').classList.remove('hidden');
+    startGame();
+};
+restartBtn.onclick = () => {
+    document.getElementById('result-screen').classList.add('hidden');
+    if (gameState !== 'CLEAR') { score = 0; scoreVal.innerText = score; level = 1; }
+    levelDisplay.innerText = `LEVEL ${level}`;
+    startGame();
+};
+function startGame() { hp = 100; hpBar.style.width = '100%'; startTime = Date.now(); gameState = 'PLAYING'; initLevel(level); }
+
+window.onload = () => { draw(); };
+</script>
+</body>
+</html>
